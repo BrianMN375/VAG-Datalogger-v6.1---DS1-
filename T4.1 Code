@@ -1,0 +1,498 @@
+
+// Base code for TFT Logger v6.1x
+
+// Can use same wire loom as v5.0x, however this version is using non-conversion digital amplifiers and therefore only has 6 analog inputs.
+// (A10-A15 are now repurposed for reading referrent voltage from thermocouple amps)  
+
+// A6, A7, A8, A9 inputs are all 0-5v, and the signal input can be Analog, Digital, Freq, PWM, etc. 
+// A16 and A17 inputs are 0-14.5v, and the signal input can be Analog, Digital, Freq, PWM, etc. 
+// All Analog inputs are conditioned for piezoresistive sensors, such as standard pressure sensors. 
+
+// D3 and D4 are 0-14.5v Digital, Freq or PWM Inputs
+// D5 and D6 are 0-5v Digital, Freq or PWM Inputs
+// All Analog inputs are conditioned for hall-effect sensors.  EFR turbo speed sensors which output a signal of 1 pulse per 8 blades have 
+// been tested to 130,000rpms with a 12blade wheel.  Garrett sensors which output a square wave of 1 pulse per blade have not yet been tested.
+
+// D33 is a high-side output, regulated at 12v.  This is PWMable, and PWM frequency can be set independently.
+// D34 is a low-side output, NOT PWMable.
+// D36 and D37 are low-side outputs which ARE PWMable.  These two pins share a PWM Frequency timer, therefore changing 
+// PWM freq of one pin automatically changes the other pin to the same. 
+
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+
+#include <FlexCAN_T4.h>
+//CAN_message_t msg0;
+CAN_message_t msg1;
+CAN_message_t msg20;
+CAN_message_t msg21;
+CAN_message_t msg22;
+//CAN_message_t msg23;
+
+FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN3;
+
+//defintion of K-Type Thermocouple 1
+const int EGT0 = A0; //Analog pin for temp read
+const int EGT0ref = A15; //Analog pin for reading referent value
+
+const int EGT1 = A1; //Analog pin for temp read
+const int EGT1ref = A14; //Analog pin for reading referent value
+
+const int EGT2 = A2; //Analog pin for temp read
+const int EGT2ref = A13; //Analog pin for reading referent value
+
+const int EGT3 = A3; //Analog pin for temp read
+const int EGT3ref = A12; //Analog pin for reading referent value
+
+const int EGT4 = A4; //Analog pin for temp read
+const int EGT4ref = A11; //Analog pin for reading referent value
+
+const int EGT5 = A5; //Analog pin for temp read
+const int EGT5ref = A10; //Analog pin for reading referent value
+
+
+
+//K Type Thermocouple number 1
+float SenValEGT0; //Sensor value
+float SenValEGT0ref; //Sensor value from referent pin
+float Temp0; //Temperature
+float Vref0; //Referent voltage
+float Vout0; //Voltage after adc
+float TempKelvin0;
+float TCelcius0;
+float TFahrenheit0;
+
+
+//K Type Thermocouple number 2
+float SenValEGT1; //Sensor value
+float SenValEGT1ref; //Sensor value from referent pin
+float Temp1; //Temperature
+float Vref1; //Referent voltage
+float Vout1; //Voltage after adc
+float TempKelvin1;
+float TCelcius1;
+float TFahrenheit1;
+
+//K Type Thermocouple number 2
+float SenValEGT2; //Sensor value
+float SenValEGT2ref; //Sensor value from referent pin
+float Temp2; //Temperature
+float Vref2; //Referent voltage
+float Vout2; //Voltage after adc
+float TempKelvin2;
+float TCelcius2;
+float TFahrenheit2;
+
+
+//K Type Thermocouple number 3
+float SenValEGT3; //Sensor value
+float SenValEGT3ref; //Sensor value from referent pin
+float Temp3; //Temperature
+float Vref3; //Referent voltage
+float Vout3; //Voltage after adc
+float TempKelvin3;
+float TCelcius3;
+float TFahrenheit3;
+
+//K Type Thermocouple number 4
+float SenValEGT4; //Sensor value
+float SenValEGT4ref; //Sensor value from referent pin
+float Temp4; //Temperature
+float Vref4; //Referent voltage
+float Vout4; //Voltage after adc
+float TempKelvin4;
+float TCelcius4;
+float TFahrenheit4;
+
+//K Type Thermocouple number 5
+float SenValEGT5; //Sensor value
+float SenValEGT5ref; //Sensor value from referent pin
+float Temp5; //Temperature
+float Vref5; //Referent voltage
+float Vout5; //Voltage after adc
+float TempKelvin5;
+float TCelcius5;
+float TFahrenheit5;
+
+//K Type Thermocouple number 6
+float SenValEGT6; //Sensor value
+float SenValEGT6ref; //Sensor value from referent pin
+float Temp6; //Temperature
+float Vref6; //Referent voltage
+float Vout6; //Voltage after adc
+float TempKelvin6;
+float TCelcius6;
+float TFahrenheit6;
+
+//definition of external Pressure Sensors (usable range 0.5v to 4.5v)
+int offset = 102;
+int fullScale = 922;
+float SenValA8;
+int PressureA8;
+float PressureA8v;
+float SenValA9;
+int PressureA9;
+float PressureA9v;
+float SenValA10;
+int PressureA10;
+float PressureA10v;
+float SenValA11;
+int PressureA11;
+float PressureA11v;
+float SenValA12;
+int PressureA12;
+float PressureA12v;
+float SenValA13;
+int PressureA13;
+float PressureA13v;
+float SenValA14;
+int PressureA14;
+float PressureA14v;
+float SenValA17;
+int PressureA17;
+float PressureA17v;
+
+int EGTErrorState;
+
+
+
+void setup() {
+
+  Serial.begin(500000);  // Initialise the serial port
+
+   pinMode(LED_BUILTIN, OUTPUT);  // on-board LED will blink once per loop
+  pinMode(29, OUTPUT);    //VIO pin setting for CAN3 transciever
+  digitalWrite(29, HIGH);   //VIO high for CAN3 transciever
+
+ // pinMode(2, OUTPUT);    //VIO pin setting for CAN2 transciever
+ // digitalWrite(2, HIGH);   //VIO high for CAN2 transciever
+  
+  pinMode(2, INPUT);
+  pinMode(A0, INPUT);
+  pinMode(A1, INPUT);
+  pinMode(A2, INPUT);
+  pinMode(A3, INPUT);
+  pinMode(A4, INPUT);
+  pinMode(A5, INPUT);
+  
+  TFTCAN3.begin();
+  TFTCAN3.setBaudRate(500000);
+  
+// TFTCAN3.begin();
+// TFTCAN3.setBaudRate(500000);
+}
+  void loop() {
+
+
+
+    //k type thermocouple 1 (cylinder 1)
+    SenValEGT0 = analogRead(EGT0); //Digital value from temperature
+    SenValEGT0ref = analogRead(EGT0ref); //Digital value from refferent pin
+
+    //k type thermocouple 2 (cylinder 2)
+    SenValEGT1 = analogRead(EGT1); //Digital value from temperature
+    SenValEGT1ref = analogRead(EGT1ref); //Digital value from refferent pin
+
+    //k type thermocouple 3 (cylinder 3)
+    SenValEGT2 = analogRead(EGT2); //Digital value from temperature
+    SenValEGT2ref = analogRead(EGT2ref); //Digital value from refferent pin
+
+    //k type thermocouple 4 (cylinder 4)
+    SenValEGT3 = analogRead(EGT3); //Digital value from temperature
+    SenValEGT3ref = analogRead(EGT3ref); //Digital value from refferent pin
+
+    //k type thermocouple 5 (cylinder 5)
+    SenValEGT4 = analogRead(EGT4); //Digital value from temperature
+    SenValEGT4ref = analogRead(EGT4ref); //Digital value from refferent pin
+
+    //k type thermocouple 6 (post-turbine)
+    SenValEGT5 = analogRead(EGT5); //Digital value from temperature
+    SenValEGT5ref = analogRead(EGT5ref); //Digital value from refferent pin
+
+
+  //------  EGT Sensor Calculations ------------------------------------------------------------------------------------------------
+
+
+    //thermocouple 1 calculations
+    Vref0 = (SenValEGT0ref * 3.3) / 1024.0; //Conversion analog to digital for referent value
+    Vout0 = (SenValEGT0 * 14.5) / 1024.0; //Conversion analog to digital for the temperature read voltage
+    Temp0 = (Vout0 - Vref0) / 0.005; //Temperature calculation
+
+    //thermocouple 2 calculations
+    Vref1 = (SenValEGT1ref * 3.3) / 1024.0; //Conversion analog to digital for referent value
+    Vout1 = (SenValEGT1 * 14.5) / 1024.0; //Conversion analog to digital for the temperature read voltage
+    Temp1 = ((Vout1 - Vref1) / 0.005) + 2; //Temperature calculation
+
+    //thermocouple 3 calculations
+    Vref2 = (SenValEGT2ref * 3.3) / 1024.0; //Conversion analog to digital for referent value
+    Vout2 = (SenValEGT2 * 14.5) / 1024.0; //Conversion analog to digital for the temperature read voltage
+    Temp2 = (Vout2 - Vref2) / 0.005; //Temperature calculation
+
+    //thermocouple 4 calculations
+    Vref3 = (SenValEGT3ref * 3.3) / 1024.0; //Conversion analog to digital for referent value
+    Vout3 = (SenValEGT3 * 14.5) / 1024.0; //Conversion analog to digital for the temperature read voltage
+    Temp3 = (Vout3 - Vref3) / 0.005; //Temperature calculation
+    
+    //thermocouple 5 calculations
+    Vref4 = (SenValEGT4ref * 3.3) / 1024.0; //Conversion analog to digital for referent value
+    Vout4 = (SenValEGT4 * 14.5) / 1024.0; //Conversion analog to digital for the temperature read voltage
+    Temp4 = (Vout4 - Vref4) / 0.005; //Temperature calculation
+    
+    //thermocouple 6 calculations
+    Vref5 = (SenValEGT5ref * 3.3) / 1024.0; //Conversion analog to digital for referent value
+    Vout5 = (SenValEGT5 * 14.5) / 1024.0; //Conversion analog to digital for the temperature read voltage
+    Temp5 = (Vout5 - Vref5) / 0.005; //Temperature calculation
+
+
+
+  int ET0 = Temp0;
+  int ET1 = Temp1;
+  int ET2 = Temp2;
+  int ET3 = Temp3;
+  int ET4 = Temp4;
+  int ET5 = Temp5;
+
+  int EGTavg = ((ET0 + ET1 + ET2 + ET3 + ET4) / 5);
+
+  int EGT0delta = ET0 - EGTavg;
+  int EGT1delta = ET1 - EGTavg;
+  int EGT2delta = ET2 - EGTavg;
+  int EGT3delta = ET3 - EGTavg;
+  int EGT4delta = ET4 - EGTavg;
+
+
+
+
+  
+  //------  EGT Raw Values CAN Message Coordination------------------------------------------------------------------------------------------------
+
+
+unsigned char lsbEGT0, msbEGT0, lsbEGT1, msbEGT1, lsbEGT2, msbEGT2, lsbEGT3, msbEGT3, lsbEGT4, msbEGT4, lsbEGT5, msbEGT5, lsbEGTavg, msbEGTavg;
+
+
+  lsbEGT0 = ET0 & 0x00FF;
+  msbEGT0 = (ET0 >> 8) & 0x00FF;
+
+  lsbEGT1 = ET1 & 0x00FF;
+  msbEGT1 = (ET1 >> 8) & 0x00FF;
+
+  lsbEGT2 = ET2 & 0x00FF;
+  msbEGT2 = (ET2 >> 8) & 0x00FF;
+
+  lsbEGT3 = ET3 & 0x00FF;
+  msbEGT3 = (ET3 >> 8) & 0x00FF;
+
+  lsbEGT4 = ET4 & 0x00FF;
+  msbEGT4 = (ET4 >> 8) & 0x00FF;
+
+  lsbEGT5 = ET5 & 0x00FF;
+  msbEGT5 = (ET5 >> 8) & 0x00FF;
+
+  lsbEGTavg = EGTavg & 0x00FF;
+  msbEGTavg = (EGTavg >> 8) & 0x00FF;
+
+  
+
+ //------ Raw EGT CAN bitshift operations------------------------------------------------------------------------------------------------
+
+
+    CAN_message_t msg20;
+  msg20.len = 8;
+  msg20.id = 0x780;
+  msg20.buf[0] = lsbEGT0; //0
+  msg20.buf[1] = msbEGT0; //0
+  msg20.buf[2] = lsbEGT1; //1
+  msg20.buf[3] = msbEGT1; //1
+  msg20.buf[4] = lsbEGT2; //2
+  msg20.buf[5] = msbEGT2; //2
+  msg20.buf[6] = lsbEGT3; //3
+  msg20.buf[7] = msbEGT3; //3
+
+  CAN_message_t msg21;
+  msg21.len = 8;
+  msg21.id = 0x781;
+  msg21.buf[0] = lsbEGT4; //4
+  msg21.buf[1] = msbEGT4; //4
+  msg21.buf[2] = lsbEGT5; //5
+  msg21.buf[3] = msbEGT5; //5
+  msg21.buf[4] = lsbEGTavg; //6
+  msg21.buf[5] = msbEGTavg; //6
+  msg21.buf[6] = 0; //7
+  msg21.buf[7] = 0; //7
+
+//  TFTCAN3.write(msg20);
+////  delay (2);
+// 
+//  TFTCAN3.write(msg21);
+////  delay (2);
+
+
+ //------ EGT Error State CAN Coordination ------------------------------------------------------------------------------------------------
+
+  if ((ET0 != 0) && (ET1 != 0) && (ET2 != 0) && (ET3 != 0) && (ET4 != 0) && (EGT0delta < 60) && (EGT1delta < 60) && (EGT2delta < 60) && (EGT3delta < 60) && (EGT4delta < 60)) {
+    EGTErrorState = 1; }
+ 
+  
+  else if (ET0 == 0) { 
+   EGTErrorState = 6; }
+  else if (EGT0delta > 60) { 
+    EGTErrorState = 11; }
+
+  else if (ET1 == 0) { 
+   EGTErrorState = 7; }
+  else if (EGT1delta > 60) { 
+    EGTErrorState = 12; }
+
+  else if (ET2 == 0) { 
+    EGTErrorState = 8; }
+  else if (EGT2delta > 60) { 
+    EGTErrorState = 13; }
+
+  else if (ET3 == 0) { 
+    EGTErrorState = 9; }
+  else if (EGT3delta > 60) { 
+    EGTErrorState = 14; }
+
+  
+  else if (ET4 == 0) { 
+    EGTErrorState = 10; }
+  else if (EGT4delta > 60) { 
+    EGTErrorState = 15; }
+
+
+ //------ Calculated EGT Error CAN Message Creations------------------------------------------------------------------------------------------------
+
+
+  CAN_message_t msg1;
+  msg1.len = 8;
+  msg1.id = 0x784;
+  msg1.buf[0] = EGTErrorState; //16
+  msg1.buf[1] = 0; //16
+  msg1.buf[2] = 0; //17
+  msg1.buf[3] = 0; //17
+  msg1.buf[4] = 0; //18
+  msg1.buf[5] = 0; //18
+  msg1.buf[6] = 0; //19
+  msg1.buf[7] = 0; //19
+
+
+//  TFTCAN3.write(msg1);
+////  delay (2);
+
+
+      Serial.print(Temp0);
+      Serial.print("      ");
+      Serial.print(Temp1);
+      Serial.print("      ");
+      Serial.print(Temp2);
+      Serial.print("      ");
+      Serial.print(Temp3);
+      Serial.print("      ");
+      Serial.print(Temp4);
+      Serial.print("      ");
+      Serial.print(Temp5);
+//      Serial.print(" .......     ");
+//      Serial.print(lsbEGT0);
+//      Serial.print("      ");
+//      Serial.print(msbEGT0);
+//      Serial.print("      ");
+//      Serial.print(ET2);
+//      Serial.print("      ");
+//      Serial.print(ET3);
+//      Serial.print("      ");
+//      Serial.print(ET4);
+//      Serial.print("      ");
+//      Serial.print(ET5);
+      Serial.println("      ");
+
+
+
+
+  //---------------   Analog 0-5v Sensor Inputs---------------------------------------------------------------------------------------
+
+  //Pre-TB MAP Sensor 100psig/6.9bar/6900hpa calculations
+  SenValA8 = analogRead(A8); //Digital value from 0-14.5v input
+  PressureA8v = (SenValA8 * 5) / 980; // to  pressure conversion
+  PressureA8 = ((PressureA8v * 1725) + 137); // to  pressure conversion
+
+
+  //Post-TB MANIFOLD PRESSURE 1 sensor 58psig/72psia/5000hpa calculations
+  SenValA9 = analogRead(A9); //Digital value from Pressure Sensor 5barAbsolute
+  PressureA9v = (SenValA9 * 5)  / 980; // to  pressure conversion
+  PressureA9 = ((PressureA9v * 1250) - 625); // to  pressure conversion
+
+  //------------------------------------------------------------------------------------------------------
+
+
+
+  unsigned char lsbA8, msbA8, lsbA9, msbA9;
+
+
+    lsbA8 = PressureA8 & 0x00FF;
+    msbA8 = (PressureA8 >> 8) & 0x00FF;
+  
+    lsbA9 = PressureA9 & 0x00FF;
+    msbA9 = (PressureA9 >> 8) & 0x00FF;
+
+
+  //------------------------------------------------------------------------------------------------------
+
+
+
+
+
+  CAN_message_t msg22;
+  msg22.len = 8;
+  msg22.id = 0x782;
+  msg22.buf[0] = lsbA8; //8
+  msg22.buf[1] = msbA8; //8
+  msg22.buf[2] = lsbA9; //9
+  msg22.buf[3] = msbA9; //9
+  msg22.buf[4] = 0; //10
+  msg22.buf[5] = 0; //10
+  msg22.buf[6] = 0; //11
+  msg22.buf[7] = 0; //11
+
+
+  CAN_message_t msg23;
+  msg23.len = 8;
+  msg23.id = 0x783;
+  msg23.buf[0] = 0; //12
+  msg23.buf[1] = 0; //12
+  msg23.buf[2] = 0; //13
+  msg23.buf[3] = 0; //13
+  msg23.buf[4] = 0; //14
+  msg23.buf[5] = 0; //14
+  msg23.buf[6] = 0; //15
+  msg23.buf[7] = 0; //15
+
+
+
+
+  TFTCAN3.write(msg22);
+  delay (2);
+
+
+//  TFTCAN3.write(msg23);
+//  delay (2);
+
+
+  TFTCAN3.write(msg20);
+  delay (2);
+ 
+  TFTCAN3.write(msg21);
+  delay (2);
+
+  TFTCAN3.write(msg1);
+  delay (10);
+  
+//  Serial.print(PressureA8v);
+//  Serial.print("    ");
+//  Serial.print(PressureA8);
+//  Serial.print("    ");
+//  Serial.print(PressureA9v);
+//  Serial.print("    ");
+//  Serial.print(PressureA9);
+//  Serial.println("    ");
+
+    }
